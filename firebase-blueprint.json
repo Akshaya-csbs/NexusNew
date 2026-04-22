@@ -26,6 +26,32 @@
         "lastCheckIn": { "type": "string", "format": "date-time" }
       },
       "required": ["roomNumber", "floor", "occupancyStatus"]
+    },
+    "responder_unit": {
+      "title": "Responder Unit",
+      "description": "Security unit assigned to a sector.",
+      "type": "object",
+      "properties": {
+        "unitId": { "type": "string" },
+        "commander": { "type": "string" },
+        "sectorId": { "type": "string" },
+        "status": { "type": "string", "enum": ["standby", "patrol", "active", "evacuating"] },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["unitId", "commander", "sectorId", "status"]
+    },
+    "operational_log": {
+      "title": "Operational Log",
+      "description": "System transaction log for audit trail.",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "event": { "type": "string" },
+        "source": { "type": "string" },
+        "status": { "type": "string" },
+        "category": { "type": "string", "enum": ["system", "security", "alert", "hardware"] }
+      },
+      "required": ["timestamp", "event", "source", "status", "category"]
     }
   },
   "firestore": {
@@ -36,6 +62,14 @@
     "/rooms/{roomId}": {
       "schema": "room_status",
       "description": "Registry of room occupancy and safety status."
+    },
+    "/units/{unitId}": {
+      "schema": "responder_unit",
+      "description": "Real-time tracking of security personnel."
+    },
+    "/logs/{logId}": {
+      "schema": "operational_log",
+      "description": "System transaction history."
     }
   }
 }

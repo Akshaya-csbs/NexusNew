@@ -1,37 +1,64 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default deny
+    // 0. Default Deny Catch-all
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
-    function isSignedIn() {
-      return request.auth != null;
+    // Phase 3: Primitives
+    function isSignedIn() { return request.auth != null; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // Phase 4: Entity Blueprints
+    function isValidCrisis(data) {
+      return data.crisisType in ['fire', 'smoke', 'intrusion', 'panic']
+          && data.floor is int
+          && data.roomNumber is string
+          && data.roomNumber.size() <= 64
+          && data.severity in ['low', 'medium', 'high', 'critical']
+          && data.status in ['active', 'contained', 'resolved'];
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function isValidRoom(data) {
+      return data.roomNumber is string
+          && data.roomNumber.size() <= 64
+          && data.floor is int
+          && data.occupancyStatus in ['evacuated', 'occupied', 'unknown'];
     }
 
-    // Crises Collection
+    function isValidLog(data) {
+      return data.event is string && data.event.size() <= 1000
+          && data.source is string
+          && data.status is string
+          && data.category is string;
+    }
+
+    // --- Collection Routes ---
+
     match /crises/{crisisId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() 
-        && request.resource.data.keys().hasAll(['crisisType', 'floor', 'roomNumber', 'severity', 'timestamp', 'status'])
-        && request.resource.data.crisisType is string
-        && request.resource.data.floor is int
-        && request.resource.data.severity in ['low', 'medium', 'high', 'critical']
-        && request.resource.data.status == 'active';
-      allow update: if isSignedIn() 
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'severity']);
+      allow read: if true; // Public safety broadcasts
+      allow create: if isValidCrisis(incoming()) && (incoming().timestamp == request.time);
+      allow update: if isValidCrisis(incoming());
+      allow delete: if true; // Managed by cleanup routine
     }
 
-    // Rooms Collection
     match /rooms/{roomId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn(); // Simplified for prototype, in production would be restricted to system/admin
+      allow read: if true;
+      allow write: if isValidRoom(incoming());
+    }
+
+    match /units/{unitId} {
+      allow read: if true;
+      allow write: if true; // Demo allows unit state updates
+    }
+
+    match /logs/{logId} {
+      allow read: if true;
+      allow create: if isValidLog(incoming());
+      allow delete: if true;
     }
   }
 }

@@ -6,6 +6,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
+  streamCrises, streamUnits, streamLogs, streamRooms, triggerCrisis, seedDatabase, 
+  CrisisEvent, ResponderUnit, OperationalLog, RoomStatus, updateRoomStatus, clearAllCrises,
+  auth
+} from './services/firebaseService';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { generateEvacuationRoute, EvacuationStep } from './services/aiService';
+import { 
   Shield, 
   AlertTriangle, 
   Layers, 
@@ -26,9 +33,22 @@ import {
   Smartphone,
   CheckCircle,
   Navigation,
-  Cloud
+  Cloud,
+  BookOpen,
+  MapPin,
+  Asterisk,
+  Coffee,
+  CloudSun,
+  Utensils,
+  Sun,
+  Wind,
+  Package,
+  Box,
+  Pill,
+  Droplet
 } from 'lucide-react';
 import { cn } from './lib/utils';
+import MockMap from './components/MockMap';
 import { 
   AreaChart, 
   Area, 
@@ -43,7 +63,7 @@ import {
 
 type AdminSubView = 'dashboard' | 'incidents' | 'map' | 'units' | 'logs';
 type GuestSubView = 'checkin' | 'dashboard' | 'map' | 'instructions' | 'sos';
-type View = 'pitch' | 'admin' | 'guide';
+type View = 'pitch' | 'admin' | 'guide' | 'simulation';
 type Scene = 'problem' | 'activation' | 'pillars' | 'outcome' | 'gcp';
 
 // --- Constants ---
@@ -58,13 +78,30 @@ const SCENE_DURATION = {
 
 // --- Components ---
 
-const Sidebar = ({ currentView, currentSubView, setView, setSubView }: { 
+const Sidebar = ({ currentView, currentSubView, setView, setSubView, activeCrisis }: { 
   currentView: View, 
   currentSubView: AdminSubView,
   setView: (v: View) => void,
-  setSubView: (sv: AdminSubView) => void
+  setSubView: (sv: AdminSubView) => void,
+  activeCrisis?: CrisisEvent
 }) => {
   const isAdmin = currentView === 'admin';
+  const isCrisisActive = !!activeCrisis;
+
+  const toggleMockCrisis = () => {
+    if (isCrisisActive) {
+      clearAllCrises();
+    } else {
+      triggerCrisis({ 
+        crisisType: 'fire', 
+        floor: 4, 
+        roomNumber: '412', 
+        severity: 'critical',
+        description: 'Mock emergency drill initiated for sector evaluation.'
+      });
+    }
+  };
+
   return (
     <aside className="hidden md:flex flex-col bg-slate-950 text-secondary font-headline shadow-2xl fixed left-0 top-0 h-full w-72 z-50">
       <div className="p-8 flex flex-col gap-1 bg-slate-900/50">
@@ -90,12 +127,12 @@ const Sidebar = ({ currentView, currentSubView, setView, setSubView }: {
           <button
             key={item.id}
             onClick={() => {
-              setView('admin');
+              if (currentView !== 'simulation') setView('admin');
               setSubView(item.id as AdminSubView);
             }}
             className={cn(
               "flex items-center gap-4 py-3 px-8 mx-2 transition-all rounded-lg",
-              isAdmin && currentSubView === item.id 
+              (currentView === 'admin' || currentView === 'simulation') && currentSubView === item.id 
                 ? "bg-slate-800 text-secondary border-l-4 border-secondary translate-x-1" 
                 : "text-slate-400 hover:text-slate-100 hover:bg-slate-900/50"
             )}
@@ -120,8 +157,16 @@ const Sidebar = ({ currentView, currentSubView, setView, setSubView }: {
       </nav>
 
       <div className="px-6 pb-6">
-        <button className="w-full py-4 bg-secondary text-white rounded-xl font-black text-sm uppercase tracking-wider shadow-lg shadow-secondary/20 hover:brightness-110 active:scale-95 transition-all">
-          Broadcast Alert
+        <button 
+          onClick={toggleMockCrisis}
+          className={cn(
+            "w-full py-4 rounded-xl font-black text-sm uppercase tracking-wider shadow-lg transition-all active:scale-95",
+            isCrisisActive 
+              ? "bg-emerald-500 text-white shadow-emerald-500/20" 
+              : "bg-[#c00000] text-white shadow-red-500/20"
+          )}
+        >
+          {isCrisisActive ? 'End Mock Crisis' : 'Mock Crisis'}
         </button>
       </div>
 
@@ -168,6 +213,13 @@ const TopBar = ({ title, view, setView }: { title: string, view: View, setView: 
         >
           Operations
         </button>
+        <button 
+          onClick={() => setView('simulation')}
+          className={cn("text-xs font-bold uppercase tracking-widest transition-all px-4 py-1.5 rounded-full border", view === 'simulation' ? 'border-error text-error bg-error/10' : 'border-transparent text-slate-500 hover:text-on-surface')}
+        >
+          <div className={cn("inline-block w-2 h-2 rounded-full mr-2", view === 'simulation' ? 'bg-error animate-pulse' : 'bg-slate-400')} />
+          Live Demo
+        </button>
       </nav>
 
       {view !== 'pitch' && (
@@ -186,7 +238,11 @@ const TopBar = ({ title, view, setView }: { title: string, view: View, setView: 
 
 // --- Content Components ---
 
-const AdminIncidents = () => (
+const AdminIncidents = () => {
+  const [incidents, setIncidents] = useState<CrisisEvent[]>([]);
+  useEffect(() => { return streamCrises(setIncidents); }, []);
+
+  return (
   <div className="space-y-10">
     <div className="flex flex-col gap-2">
       <h2 className="text-5xl font-headline font-extrabold tracking-tight text-on-surface">Active Incidents</h2>
@@ -194,33 +250,37 @@ const AdminIncidents = () => (
     </div>
     
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      {[
-        { t: 'Intrusion Alert', d: 'Sector G North - Unauthorized access at Perimeter Gate 04.', s: 'Critical', p: 'High' },
-        { t: 'Smoke Detected', d: 'Server Room B - SUPPRESSION PRE-CHECK ACTIVE.', s: 'Warning', p: 'Medium' },
-        { t: 'Elevator Fault', d: 'Main Lobby - Unit 3 stalled between floors 4-5.', s: 'Pending', p: 'Low' },
-      ].map((inc, i) => (
-        <div key={i} className="bg-white p-8 rounded-[2rem] border border-outline-variant/10 shadow-sm space-y-4">
+      {incidents.length === 0 && <div className="col-span-3 py-12 text-center text-slate-500 font-bold uppercase tracking-widest text-xs">No active incidents. Sky is clear.</div>}
+      {incidents.map((inc, i) => {
+        const isCritical = inc.severity === 'critical' || inc.severity === 'high';
+        const isWarning = inc.severity === 'medium';
+        return (
+        <div key={inc.id || i} className="bg-white p-8 rounded-[2rem] border border-outline-variant/10 shadow-sm space-y-4">
           <div className="flex justify-between items-start">
-            <div className={cn("p-4 rounded-2xl", inc.s === 'Critical' ? 'bg-error/10 text-error' : inc.s === 'Warning' ? 'bg-secondary/10 text-secondary' : 'bg-slate-100 text-slate-500')}>
+            <div className={cn("p-4 rounded-2xl", isCritical ? 'bg-error/10 text-error' : isWarning ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-500')}>
               <ShieldAlert className="w-6 h-6" />
             </div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">#INC-042{i}</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{inc.id?.slice(0,6).toUpperCase() || 'INC'}</span>
           </div>
           <div>
-            <h3 className="text-xl font-headline font-bold text-on-surface mb-1">{inc.t}</h3>
-            <p className="text-xs text-on-surface-variant leading-relaxed">{inc.d}</p>
+            <h3 className="text-xl font-headline font-bold text-on-surface mb-1 capitalize">{inc.crisisType} Alert</h3>
+            <p className="text-xs text-on-surface-variant leading-relaxed">Room {inc.roomNumber} (Floor {inc.floor})</p>
           </div>
           <div className="pt-4 border-t border-slate-50 flex justify-between items-center">
-             <span className={cn("px-2 py-1 rounded text-[10px] font-black uppercase", inc.s === 'Critical' ? 'bg-error text-white' : 'bg-slate-200 text-slate-700')}>{inc.s}</span>
+             <span className={cn("px-2 py-1 rounded text-[10px] font-black uppercase", isCritical ? 'bg-error text-white' : 'bg-slate-200 text-slate-700')}>{inc.severity}</span>
              <button className="text-[10px] font-black uppercase tracking-widest text-secondary">Deploy Units</button>
           </div>
         </div>
-      ))}
+      )})}
     </div>
   </div>
 );
+};
 
-const AdminUnits = () => (
+const AdminUnits = () => {
+  const [units, setUnits] = useState<ResponderUnit[]>([]);
+  useEffect(() => { return streamUnits(setUnits); }, []);
+  return (
   <div className="space-y-10">
     <div className="flex flex-col gap-2">
       <h2 className="text-5xl font-headline font-extrabold tracking-tight text-on-surface">Responder Units</h2>
@@ -239,19 +299,17 @@ const AdminUnits = () => (
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-50">
-          {[
-            { id: 'ALPHA-01', c: 'Vance R.', s: 'Sector G', st: 'In Action' },
-            { id: 'BRAVO-02', c: 'Chen M.', s: 'North Wing', st: 'On Patrol' },
-            { id: 'CHARLIE-03', c: 'Smith J.', s: 'Main Lobby', st: 'Standby' },
-            { id: 'DELTA-04', c: 'Lopez K.', s: 'Sector B', st: 'Evacuating' },
-          ].map((u) => (
-            <tr key={u.id} className="hover:bg-slate-50/50 transition-all">
-              <td className="px-8 py-6 font-mono text-xs font-bold">{u.id}</td>
-              <td className="px-8 py-6 text-sm font-bold">{u.c}</td>
-              <td className="px-8 py-6 text-sm font-medium text-slate-500">{u.s}</td>
+          {units.length === 0 && (
+             <tr><td colSpan={5} className="px-8 py-12 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">No units deployed.</td></tr>
+          )}
+          {units.map((u) => (
+            <tr key={u.id || u.unitId} className="hover:bg-slate-50/50 transition-all">
+              <td className="px-8 py-6 font-mono text-xs font-bold">{u.unitId}</td>
+              <td className="px-8 py-6 text-sm font-bold">{u.commander}</td>
+              <td className="px-8 py-6 text-sm font-medium text-slate-500">{u.sectorId}</td>
               <td className="px-8 py-6">
-                <span className={cn("px-2 py-1 rounded text-[10px] font-black uppercase", u.st === 'In Action' ? 'bg-error/10 text-error' : 'bg-tertiary-fixed-dim/10 text-on-tertiary-container')}>
-                  {u.st}
+                <span className={cn("px-2 py-1 rounded text-[10px] font-black uppercase", u.status === 'active' || u.status === 'evacuating' ? 'bg-error/10 text-error' : 'bg-tertiary-fixed-dim/10 text-on-tertiary-container')}>
+                  {u.status}
                 </span>
               </td>
               <td className="px-8 py-6">
@@ -264,8 +322,204 @@ const AdminUnits = () => (
     </div>
   </div>
 );
+};
 
-const GuestCheckIn = ({ onLogin }: { onLogin: () => void }) => (
+const ResourceInventoryDashboard = () => {
+  const floors = [1, 2, 3, 4, 5];
+  const resources = [
+    { id: 'linens', label: 'Linens', icon: Wind, color: 'text-blue-500', bg: 'bg-blue-50' },
+    { id: 'safety', label: 'Safety Kits', icon: Shield, color: 'text-error', bg: 'bg-error/10' },
+    { id: 'supplies', label: 'Guest Supplies', icon: Package, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { id: 'medical', label: 'Medical', icon: Pill, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { id: 'water', label: 'Water', icon: Droplet, color: 'text-sky-500', bg: 'bg-sky-50' },
+  ];
+
+  // Mock data for overall tracking
+  const totals = {
+    linens: 420,
+    safety: 85,
+    supplies: 1240,
+    medical: 42,
+    water: 800
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white rounded-[3rem] overflow-hidden border border-slate-200 shadow-sm">
+      <div className="p-10 border-b border-slate-100 bg-slate-50/30">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-8">
+          <div>
+            <h2 className="text-4xl font-headline font-black italic tracking-tighter uppercase mb-2">Resource Inventory Engine</h2>
+            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-[0.3em]">Facility-Wide Sentinel Tracking</p>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-4">
+            {resources.map(res => (
+              <div key={res.id} className="p-4 rounded-2xl bg-white border border-slate-100 shadow-sm flex flex-col items-center gap-2 min-w-[100px]">
+                <res.icon className={cn("w-5 h-5", res.color)} />
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{res.label}</span>
+                <span className="text-lg font-black text-slate-900">{(totals as any)[res.id]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 p-10 overflow-y-auto custom-scrollbar">
+        <div className="space-y-4">
+           <div className="flex items-center justify-between mb-6">
+              <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 border-l-4 border-slate-900 pl-4">Floor-Wise Allocation</h3>
+              <div className="flex gap-2">
+                 <button className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest">Export Manifest</button>
+              </div>
+           </div>
+           
+           <div className="bg-white border border-slate-100 rounded-3xl overflow-hidden shadow-sm">
+             <table className="w-full text-left border-collapse">
+               <thead>
+                 <tr className="bg-slate-50/50 border-b border-slate-100">
+                   <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Floor Level</th>
+                   {resources.map(res => (
+                     <th key={res.id} className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">{res.label}</th>
+                   ))}
+                   <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Status</th>
+                 </tr>
+               </thead>
+               <tbody className="divide-y divide-slate-50">
+                 {floors.map(floor => (
+                   <tr key={floor} className="hover:bg-slate-50/30 transition-all group">
+                     <td className="px-8 py-6">
+                       <div className="flex items-center gap-3">
+                         <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white text-xs font-black">L{floor}</div>
+                         <span className="font-bold text-slate-900 uppercase text-xs tracking-widest">Sector {String.fromCharCode(64 + floor)}</span>
+                       </div>
+                     </td>
+                     {resources.map(res => {
+                       const count = Math.floor(Math.random() * 50) + 10;
+                       return (
+                         <td key={res.id} className="px-8 py-6">
+                           <div className="flex flex-col gap-1">
+                             <span className="text-sm font-black text-slate-900 font-mono">{count}</span>
+                             <div className="w-12 h-1 bg-slate-100 rounded-full overflow-hidden">
+                                <div 
+                                  className={cn("h-full rounded-full transition-all duration-1000", res.color.replace('text-', 'bg-'))} 
+                                  style={{ width: `${(count/60)*100}%` }} 
+                                />
+                             </div>
+                           </div>
+                         </td>
+                       );
+                     })}
+                     <td className="px-8 py-6">
+                        <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-600 text-[9px] font-black uppercase tracking-widest">Nominal</span>
+                     </td>
+                   </tr>
+                 ))}
+               </tbody>
+             </table>
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AdminLogs = () => {
+  const [logs, setLogs] = useState<OperationalLog[]>([]);
+  const [isSeeding, setIsSeeding] = useState(false);
+  useEffect(() => { 
+    const unsub = streamLogs(setLogs);
+    return () => unsub();
+  }, []);
+
+  const handleSeed = async () => {
+    setIsSeeding(true);
+    try {
+      await seedDatabase();
+    } catch (err) {
+      console.error("Manual seed failed:", err);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  return (
+  <div className="space-y-10">
+    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-5xl font-headline font-extrabold tracking-tight text-on-surface uppercase italic">System Logs</h2>
+        <p className="text-on-surface-variant font-medium">Complete transaction and activity history for NexusResponse Hub.</p>
+      </div>
+      {logs.length === 0 && (
+         <button 
+           onClick={handleSeed} 
+           disabled={isSeeding}
+           className={cn(
+             "bg-slate-900 text-white px-6 py-3 rounded-xl text-sm font-black uppercase tracking-widest shadow-xl transition-all",
+             isSeeding ? "opacity-50 cursor-wait scale-95" : "hover:scale-105 active:scale-95"
+           )}
+         >
+           {isSeeding ? 'Seeding Data...' : 'Seed Activity Logs'}
+         </button>
+      )}
+    </div>
+
+    <div className="bg-white rounded-[2.5rem] overflow-hidden border border-slate-200 shadow-sm">
+      <table className="w-full text-left">
+        <thead className="bg-slate-50 border-b border-slate-100">
+          <tr>
+            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Timestamp</th>
+            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Event</th>
+            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Source</th>
+            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Category</th>
+            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-50">
+          {logs.length === 0 && (
+             <tr><td colSpan={5} className="px-8 py-12 text-center text-[10px] font-black uppercase tracking-widest text-slate-400">No logs detected.</td></tr>
+          )}
+          {logs.map((log, i) => {
+            const t = log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString() : 'Just now';
+            return (
+              <tr key={log.id || i} className="hover:bg-slate-50/50 transition-all group">
+                <td className="px-8 py-6 font-mono text-[10px] font-bold text-slate-400">{t}</td>
+                <td className="px-8 py-6">
+                   <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "p-2 rounded-lg",
+                        log.status === 'warning' ? "bg-amber-100 text-amber-600" :
+                        log.status === 'success' ? "bg-emerald-100 text-emerald-600" :
+                        "bg-slate-100 text-slate-500"
+                      )}>
+                        <Activity className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="text-sm font-bold text-slate-900">{log.event}</span>
+                   </div>
+                </td>
+                <td className="px-8 py-6 text-xs text-slate-500 uppercase font-black tracking-widest">{log.source}</td>
+                <td className="px-8 py-6">
+                   <span className="text-[10px] font-black uppercase tracking-widest py-1 px-2 bg-slate-100 text-slate-600 rounded">{log.category}</span>
+                </td>
+                <td className="px-8 py-6">
+                   <span className={cn(
+                     "px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest shadow-sm",
+                     log.status === 'warning' ? "bg-amber-500 text-white" :
+                     log.status === 'success' ? "bg-emerald-500 text-white" :
+                     "bg-slate-100 text-slate-500"
+                   )}>
+                     {log.status}
+                   </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+};
+
+const GuestCheckIn = ({ onLogin, onNavigate }: { onLogin: () => void, onNavigate: (v: GuestSubView) => void }) => (
   <div className="flex-1 flex flex-col items-center justify-center p-8 relative overflow-hidden bg-surface">
     <div className="absolute top-[-10%] right-[-10%] w-[120%] h-[120%] bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-surface-container-low/50 via-surface/10 to-surface pointer-events-none -z-10" />
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-8">
@@ -312,66 +566,139 @@ const GuestCheckIn = ({ onLogin }: { onLogin: () => void }) => (
   </div>
 );
 
-const GuestDashboard = ({ setSubView }: { setSubView: (sv: GuestSubView) => void }) => (
-  <div className="space-y-8 pb-12">
-    <div className="text-center space-y-2">
-      <h2 className="text-4xl font-headline font-extrabold tracking-tight">Sentinel Hub</h2>
-      <p className="text-on-surface-variant font-medium">Hello, Room 412. Your wing is currently SECURE.</p>
+const GuestDashboard = ({ setSubView, activeCrisis }: { setSubView: (sv: GuestSubView) => void, activeCrisis?: CrisisEvent }) => {
+  if (!activeCrisis) {
+    return (
+      <div className="flex-1 flex flex-col px-6 py-8 overflow-y-auto custom-scrollbar gap-8 bg-white">
+        <div className="flex justify-between items-start pt-4">
+          <div className="space-y-1">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 leading-none">Welcome back,</p>
+            <h2 className="text-3xl font-headline font-black tracking-tight italic text-slate-900">MR. ANDERSON</h2>
+          </div>
+          <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center">
+             <CloudSun className="w-6 h-6 text-amber-500" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6">
+          <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 flex items-center justify-between group overflow-hidden relative">
+            <div className="relative z-10 space-y-2">
+               <div className="flex items-center gap-2 text-emerald-600">
+                 <CheckCircle className="w-4 h-4" />
+                 <span className="text-[10px] font-black uppercase tracking-widest">Sentinel Secured</span>
+               </div>
+               <p className="text-lg font-bold text-slate-800 leading-tight">Everything is exactly as it should be.</p>
+            </div>
+            <Shield className="w-16 h-16 text-slate-200 absolute -right-4 -bottom-4 rotate-12" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {[
+              { label: 'Room Service', icon: Utensils, sub: 'Dining' },
+              { label: 'Housekeeping', icon: Wind, sub: 'Clean' },
+              { label: 'Concierge', icon: Smartphone, sub: 'Assistance' },
+              { label: 'Facility Map', icon: MapIcon, sub: 'Explore', action: () => setSubView('map') },
+            ].map((item, i) => (
+              <button 
+                key={i}
+                onClick={item.action}
+                className="p-6 bg-white border border-slate-100 rounded-[2.5rem] flex flex-col gap-4 text-left shadow-sm hover:border-slate-300 transition-all active:scale-95"
+              >
+                <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-slate-900 transition-all">
+                  <item.icon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-headline font-black text-slate-900 tracking-tight uppercase italic text-sm leading-none">{item.label}</h4>
+                  <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{item.sub}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="p-8 rounded-[2.5rem] bg-slate-900 text-white flex flex-col items-center text-center gap-4 relative overflow-hidden">
+             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10" />
+             <Coffee className="w-8 h-8 text-secondary mb-2" />
+             <h3 className="text-xl font-headline font-black uppercase italic tracking-tighter relative z-10">Morning Selection</h3>
+             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest relative z-10">Premium beans from Ethiopia now available at the lobby bar.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+  <div className="flex-1 flex flex-col px-6 py-8 overflow-y-auto custom-scrollbar gap-8 bg-[#fcfdff]">
+    <div className="text-center space-y-2 pt-4">
+      <h2 className="text-4xl font-headline font-black tracking-tight italic uppercase text-red-600">Sentinel Hub</h2>
+      <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Room 412 • Sector Alpha • Secure</p>
     </div>
 
     <div className="grid grid-cols-1 gap-4">
       <button 
         onClick={() => setSubView('instructions')}
-        className="w-full p-8 bg-error rounded-[2.5rem] text-white flex flex-col gap-4 text-left relative overflow-hidden shadow-2xl shadow-error/30"
+        className="w-full p-8 bg-[#c00000] rounded-[2.5rem] text-white flex flex-col gap-4 text-left relative overflow-hidden shadow-2xl shadow-red-500/30 group active:scale-95 transition-all text-center items-center"
       >
-        <div className="absolute top-0 right-0 p-8 opacity-20"><ShieldAlert className="w-24 h-24" /></div>
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="w-8 h-8 transition-transform group-hover:scale-110" />
-          <span className="text-sm font-black uppercase tracking-widest">Active Instructions</span>
+        <div className="absolute top-0 right-0 p-8 opacity-20"><AlertTriangle className="w-24 h-24" /></div>
+        <div className="flex items-center gap-3 relative z-10">
+          <Zap className="w-6 h-6 text-white fill-white animate-pulse" />
+          <span className="text-xs font-black uppercase tracking-widest text-white/80">E-Guide Active</span>
         </div>
-        <h3 className="text-3xl font-headline font-black italic tracking-tighter uppercase leading-none">Emergency Guide Active</h3>
-        <p className="text-xs font-bold opacity-80 uppercase tracking-widest">Follow your personal route &rarr;</p>
+        <h3 className="text-4xl font-headline font-black italic tracking-tighter uppercase leading-none relative z-10">GET OUT NOW</h3>
+        <p className="text-[10px] font-bold uppercase tracking-widest bg-white/20 px-6 py-2 rounded-full relative z-10 mt-2">Start Evacuation &rarr;</p>
       </button>
 
       <div className="grid grid-cols-2 gap-4">
         <button 
           onClick={() => setSubView('map')}
-          className="p-8 bg-white border border-outline-variant/20 rounded-[2.5rem] flex flex-col gap-4 text-left shadow-sm group"
+          className="p-8 bg-white border border-slate-100 rounded-[2.5rem] flex flex-col gap-4 text-left shadow-sm group active:scale-95 transition-all"
         >
-          <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500 group-hover:bg-slate-900 group-hover:text-white transition-all">
+          <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-900 group-hover:bg-slate-950 group-hover:text-white transition-all">
             <MapIcon className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="font-headline font-black text-on-surface tracking-tight uppercase">Exit Map</h4>
-            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Spatial Overview</p>
+            <h4 className="font-headline font-black text-slate-900 tracking-tight uppercase italic text-lg leading-none">Map</h4>
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Facility</p>
           </div>
         </button>
         <button 
           onClick={() => setSubView('sos')}
-          className="p-8 bg-white border border-outline-variant/20 rounded-[2.5rem] flex flex-col gap-4 text-left shadow-sm group"
+          className="p-8 bg-white border border-slate-100 rounded-[2.5rem] flex flex-col gap-4 text-left shadow-sm group active:scale-95 transition-all"
         >
-          <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500 group-hover:bg-error group-hover:text-white transition-all">
+          <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-900 group-hover:bg-[#c00000] group-hover:text-white transition-all">
             <Zap className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="font-headline font-black text-on-surface tracking-tight uppercase">SOS Hub</h4>
-            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Call Security</p>
+            <h4 className="font-headline font-black text-slate-900 tracking-tight uppercase italic text-lg leading-none">SOS</h4>
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Security</p>
           </div>
         </button>
       </div>
 
-      <div className="bg-tertiary-fixed-dim/10 p-8 rounded-[2.5rem] border border-tertiary-fixed-dim/20 flex flex-col gap-4">
-        <div className="flex items-center gap-3 text-on-tertiary-container">
-          <div className="w-1.5 h-1.5 rounded-full bg-tertiary-fixed-dim animate-pulse" />
-          <span className="text-[10px] font-black uppercase tracking-widest">System Status</span>
+      <div className="bg-red-50 p-8 rounded-[2.5rem] border border-red-100 flex flex-col gap-2 items-center text-center">
+        <div className="flex items-center gap-2 text-red-600">
+          <div className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />
+          <span className="text-[10px] font-black uppercase tracking-widest">Emergency Broadcast</span>
         </div>
-        <p className="text-sm font-bold text-on-surface leading-tight">All Campus monitoring nodes are nominal. Evacuation routes are currently optimized for your sector.</p>
+        <p className="text-[11px] font-bold text-slate-600 leading-relaxed uppercase tracking-wide">Crisis detected at Sector Alpha. Automatic evacuation protocols have been engaged. Follow the e-guide.</p>
       </div>
     </div>
   </div>
 );
+};
 
-const AdminDashboard = () => (
+const AdminDashboard = ({ rooms }: { rooms: RoomStatus[] }) => {
+  const [logs, setLogs] = useState<OperationalLog[]>([]);
+  const [crises, setCrises] = useState<CrisisEvent[]>([]);
+  
+  useEffect(() => {
+    const unsubLogs = streamLogs(setLogs);
+    const unsubCrises = streamCrises(setCrises);
+    return () => { unsubLogs(); unsubCrises(); };
+  }, []);
+  
+  const activeAlerts = crises.filter(c => c.status === 'active').length;
+
+  return (
   <div className="space-y-10">
     {/* Page Header */}
     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -383,6 +710,11 @@ const AdminDashboard = () => (
         <h2 className="text-5xl font-headline font-extrabold tracking-tight text-on-surface">Real-Time Operations</h2>
       </div>
       <div className="flex items-center gap-3">
+        {crises.length === 0 && (
+          <button onClick={() => seedDatabase()} className="bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-600 transition-colors">
+            Seed Demo Data
+          </button>
+        )}
         <div className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-lg text-sm font-label font-medium text-slate-700 shadow-sm">
           <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
         </div>
@@ -423,13 +755,13 @@ const AdminDashboard = () => (
               <AlertTriangle className="w-4 h-4 text-secondary" />
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-5xl font-headline font-black text-white">03</span>
+              <span className="text-5xl font-headline font-black text-white">{activeAlerts.toString().padStart(2, '0')}</span>
               <span className="text-xs font-bold text-secondary font-label">Action Req.</span>
             </div>
           </div>
         </div>
 
-        {/* Map Placeholder */}
+        {/* Map Placeholder Replacement */}
         <div className="bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-sm flex flex-col h-[500px] relative group">
           <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 relative z-20">
             <div className="flex items-center gap-3">
@@ -447,52 +779,13 @@ const AdminDashboard = () => (
           </div>
           
           <div className="flex-1 relative bg-slate-50 overflow-hidden">
-            <img src="https://picsum.photos/seed/blueprint/1200/800?grayscale" alt="Map" className="w-full h-full object-cover opacity-20 grayscale" referrerPolicy="no-referrer" />
-            
-            <motion.div 
-               initial={{ opacity: 0, scale: 0.9 }} 
-               animate={{ opacity: 1, scale: 1 }} 
-               className="absolute top-1/4 left-1/4 p-8 bg-slate-950/90 border border-white/10 rounded-[2rem] backdrop-blur-2xl shadow-2xl text-white max-w-[280px]"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">North Wing Focus</span>
-                <div className="w-2 h-2 rounded-full bg-emerald-500" />
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed font-medium">Sensors calibrated. Last automated sweep successful. No anomalies detected.</p>
-              <div className="mt-6 pt-4 border-t border-white/5 flex justify-between items-baseline">
-                <div className="flex flex-col">
-                  <span className="text-3xl font-black italic">92%</span>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cleared</span>
-                </div>
-                <button className="text-[10px] font-black text-secondary uppercase tracking-[0.2em]">Explore Zone</button>
-              </div>
-            </motion.div>
+            <MockMap rooms={rooms} crises={crises} className="h-full border-none rounded-none" />
           </div>
         </div>
       </div>
 
       {/* Right Column */}
       <div className="col-span-12 lg:col-span-4 space-y-8">
-        <div className="bg-slate-950 rounded-[2.5rem] p-10 shadow-2xl border border-white/5 relative overflow-hidden group">
-          <div className="absolute -top-10 -right-10 w-40 h-40 bg-secondary/20 rounded-full blur-3xl transition-all group-hover:bg-secondary/30" />
-          <div className="relative z-10 flex flex-col items-center">
-            <div className="w-16 h-16 rounded-[1.25rem] bg-white/5 flex items-center justify-center mb-6 border border-white/10 shadow-lg">
-              <Shield className="w-8 h-8 text-secondary" />
-            </div>
-            <h3 className="font-headline font-black text-2xl text-white tracking-tight mb-2">System Authority</h3>
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-[0.3em] mb-8">Sentinel Protocol v4.2</p>
-            
-            <div className="w-full space-y-3">
-              <button className="w-full py-5 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-black text-xs uppercase tracking-widest rounded-2xl transition-all">
-                Run Integrity Check
-              </button>
-              <button className="w-full py-5 bg-error text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl shadow-2xl shadow-error/30 hover:brightness-110 active:scale-95 transition-all">
-                Emergency Broadcast
-              </button>
-            </div>
-          </div>
-        </div>
-
         <div className="bg-white border border-slate-200 rounded-[2.5rem] shadow-sm flex flex-col h-[500px] overflow-hidden">
           <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">System Activity</h3>
@@ -502,31 +795,32 @@ const AdminDashboard = () => (
              </div>
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-            {[
-              { t: '12:44:02', title: 'Batch Inbound: 45 Guests', sub: 'North Gate Hub', status: 'normal', icon: Users },
-              { t: '12:38:15', title: 'Sensor Latency Detected', sub: 'South Wing Exit B', status: 'warning', icon: Activity },
-              { t: '12:15:00', title: 'Roster Sync Complete', sub: 'Automated Task', status: 'success', icon: CheckCircle },
-              { t: '11:55:20', title: 'Zone Cleared: Pool Side', sub: 'Manual Patrol', status: 'success', icon: Shield },
-              { t: '11:30:10', title: 'Hardware Self-Test', sub: 'Routine Check', status: 'normal', icon: Settings },
-            ].map((item, i) => (
+            {logs.length === 0 && <div className="p-8 text-center text-slate-400 font-bold uppercase tracking-widest text-xs">No logs found.</div>}
+            {logs.slice(0, 5).map((log, i) => {
+              const t = log.timestamp?.toDate ? log.timestamp.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}) : 'Just now';
+              let Icon = Activity;
+              if (log.category === 'security') Icon = Shield;
+              if (log.category === 'hardware') Icon = Settings;
+              
+              return (
               <div key={i} className="flex gap-4 p-5 hover:bg-slate-50 transition-all rounded-[1.5rem] group cursor-pointer">
                 <div className={cn(
                   "w-10 h-10 rounded-xl flex items-center justify-center transition-all group-hover:scale-110",
-                  item.status === 'warning' ? "bg-secondary/10 text-secondary" :
-                  item.status === 'success' ? "bg-emerald-500/10 text-emerald-600" :
+                  log.status === 'warning' ? "bg-secondary/10 text-secondary" :
+                  log.status === 'success' ? "bg-emerald-500/10 text-emerald-600" :
                   "bg-slate-100 text-slate-500"
                 )}>
-                  <item.icon className="w-5 h-5" />
+                  <Icon className="w-5 h-5" />
                 </div>
                 <div className="flex-1">
                   <div className="flex justify-between items-start">
-                    <h4 className="text-sm font-bold text-on-surface">{item.title}</h4>
-                    <span className="font-mono text-[9px] text-slate-400 font-bold">{item.t}</span>
+                    <h4 className="text-sm font-bold text-on-surface">{log.event}</h4>
+                    <span className="font-mono text-[9px] text-slate-400 font-bold">{t}</span>
                   </div>
-                  <p className="text-[11px] font-medium text-slate-500 mt-0.5">{item.sub}</p>
+                  <p className="text-[11px] font-medium text-slate-500 mt-0.5">{log.source}</p>
                 </div>
               </div>
-            ))}
+            )})}
           </div>
           <button className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface border-t border-slate-100 hover:bg-slate-50 transition-colors">
             Access Transaction Logs
@@ -536,75 +830,140 @@ const AdminDashboard = () => (
     </div>
   </div>
 );
+};
 
-const GuestGuide = ({ onBack }: { onBack: () => void }) => (
-  <div className="flex-1 flex flex-col items-center justify-center p-8 max-w-sm mx-auto">
-    <div className="w-full space-y-12">
-      <button onClick={onBack} className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2 hover:text-on-surface transition-colors">
-        <ChevronRight className="w-4 h-4 rotate-180" /> Back to Hub
-      </button>
-      <div className="text-center space-y-4">
-        <div className="inline-flex p-4 rounded-3xl bg-error/10 text-error mb-2 animate-pulse">
-           <AlertTriangle className="w-12 h-12" />
-        </div>
-        <h2 className="text-6xl font-headline font-black text-error tracking-tighter italic">Turn left</h2>
-        <p className="text-2xl font-headline font-bold text-secondary tracking-tight">in 15 feet</p>
-      </div>
+const GuestGuide = ({ onBack, onNavigate, activeCrisis, roomNumber, floorNumber }: { onBack: () => void, onNavigate: (v: GuestSubView) => void, activeCrisis?: CrisisEvent, roomNumber: string, floorNumber: number }) => {
+  const [steps, setSteps] = useState<EvacuationStep[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-      <div className="bg-surface-container-low p-2 rounded-[2.5rem] shadow-sm">
-        <div className="px-6 py-4 flex justify-between items-center text-on-surface text-[10px] font-black uppercase tracking-[0.2em]">
-          <span>Evacuation Route</span>
-          <span className="px-2 py-0.5 bg-tertiary-fixed-dim/20 text-on-tertiary-container rounded">Active</span>
+  useEffect(() => {
+    let isMounted = true;
+    const loadRoute = async () => {
+      if (!activeCrisis) {
+        setSteps([{ id: 1, title: 'Safe Zone', sub: 'Monitoring all blocks. No active alerts for your sector.' }]);
+        setIsLoading(false);
+        return;
+      }
+      
+      const context = `${activeCrisis.crisisType} reported at Floor ${activeCrisis.floor || 'Unknown'}, Area ${activeCrisis.roomNumber || 'Unknown'}. Severity: ${activeCrisis.severity}.`;
+      
+      setIsLoading(true);
+      setError(null);
+      
+      try {
+        const routeSteps = await generateEvacuationRoute(roomNumber, floorNumber, context);
+        if (isMounted) {
+          setSteps(routeSteps);
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to generate route:", err);
+        if (isMounted) {
+          setError("Offline Protocol Active");
+          setSteps([
+            { id: 1, title: 'Exit room', sub: 'Move quickly but calmly towards the main hallway door.' },
+            { id: 2, title: 'Proceed 15 feet', sub: 'Follow the wall to your left until you reach the marked intersection.' },
+            { id: 3, title: 'Continue straight', sub: 'Head towards the primary stairwell. Do not use elevators.' }
+          ]);
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadRoute();
+    return () => { isMounted = false; };
+  }, [activeCrisis?.id, activeCrisis?.status, roomNumber, floorNumber]);
+
+  return (
+    <div className="flex-1 flex flex-col bg-[#fcfdff] h-full text-slate-900 font-sans overflow-hidden">
+      <div className="flex-1 flex flex-col px-6 py-8 overflow-y-auto custom-scrollbar gap-8">
+        {/* Urgent Instruction */}
+        <div className="flex flex-col items-center text-center space-y-4 pt-4">
+          <div className="p-4 rounded-full">
+            <AlertTriangle className="w-16 h-16 text-[#c00000] fill-[#c00000]/10" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-5xl font-black tracking-tight text-[#c00000] italic leading-none">
+              {isLoading ? "Calculating..." : (steps?.[1]?.title || "Stay Alert")}
+            </h1>
+            <p className="text-lg font-black text-[#a66a00] uppercase tracking-wider">
+              {isLoading ? "Analyzing Spatial Data" : "in 15 feet"}
+            </p>
+          </div>
         </div>
-        <div className="space-y-2">
-          {[
-            { id: 1, title: 'Exit room', sub: 'Move quickly but calmly towards hall.', done: true },
-            { id: 2, title: 'Proceed 15 feet', sub: 'Follow the wall to your left.', active: true },
-            { id: 3, title: 'Continue straight', sub: 'Head towards primary stairwell.', pending: true },
-          ].map((step) => (
-            <div key={step.id} className={cn(
-              "p-6 rounded-[2rem] flex gap-5 items-start transition-all relative overflow-hidden",
-              step.active ? "bg-white shadow-xl border border-outline-variant/20" : 
-              step.pending ? "opacity-40" : "opacity-80 scale-95 origin-left"
-            )}>
-              {step.active && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-error" />}
-              <div className={cn(
-                "w-12 h-12 rounded-full flex items-center justify-center font-headline font-black text-lg shadow-inner",
-                step.active ? "bg-error text-white" : "bg-slate-200 text-slate-500"
-              )}>
-                {step.id}
+
+        {/* Route Container */}
+        <div className="bg-[#eff4ff]/60 rounded-[2.5rem] p-4 flex flex-col gap-4">
+          <div className="px-6 py-2 flex justify-between items-center text-[10px] font-black uppercase tracking-[0.2em] text-[#002868]">
+            <span>Evacuation Route</span>
+            <span className="px-3 py-1 bg-[#dbe8ff] text-[#002868] rounded-full text-[8px] font-black tracking-widest">Active</span>
+          </div>
+
+          <div className="space-y-3">
+            {isLoading ? (
+              <div className="p-12 flex flex-col items-center gap-4 text-[#002868] opacity-40">
+                <div className="w-8 h-8 border-4 border-current border-t-transparent rounded-full animate-spin" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Optimizing Exit Vector...</span>
               </div>
-              <div className="flex-1">
-                <h3 className={cn("font-bold text-base", step.active ? "text-error" : "text-on-surface")}>{step.title}</h3>
-                <p className="text-xs text-on-surface-variant leading-relaxed mt-1">{step.sub}</p>
-              </div>
-            </div>
-          ))}
+            ) : (
+              (steps || []).slice(0, 3).map((step, index) => {
+                const active = index === 1; // Simulation: let's make the second one active for the "Turn left" visual
+                return (
+                  <motion.div 
+                    key={index}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    className={cn(
+                      "bg-white p-6 rounded-[2rem] flex gap-5 items-start relative overflow-hidden transition-all shadow-sm",
+                      active ? "border-l-[6px] border-[#c00000]" : "opacity-60"
+                    )}
+                  >
+                    <div className={cn(
+                      "min-w-12 h-12 rounded-full flex items-center justify-center transition-all",
+                      active ? "bg-red-50" : "bg-slate-50"
+                    )}>
+                      {active ? (
+                        <div className="p-2 rounded-full bg-red-100 rotate-[-90deg]">
+                           <Navigation className="w-5 h-5 text-[#c00000] fill-[#c00000]" />
+                        </div>
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+                           <span className="font-headline font-black text-sm italic text-slate-400">{index + 1}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <h3 className={cn(
+                        "font-black text-lg italic tracking-tighter leading-tight uppercase",
+                        active ? "text-[#c00000]" : "text-[#002868]"
+                      )}>
+                        {step.title}
+                      </h3>
+                      <p className="text-[11px] font-bold text-slate-500 leading-snug">
+                        {step.sub}
+                      </p>
+                    </div>
+                  </motion.div>
+                );
+              })
+            )}
+          </div>
         </div>
-      </div>
 
-      <button className="w-full py-6 bg-tertiary-container text-on-tertiary-container rounded-[2rem] font-headline font-black text-2xl tracking-tighter italic shadow-[0_12px_40px_rgba(0,33,19,0.15)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-4">
-        <CheckCircle className="w-8 h-8" />
-        I AM SAFE
-      </button>
-
-      <div className="flex justify-around items-center pt-8">
-        <button className="flex flex-col items-center gap-2 opacity-50 hover:opacity-100 transition-all group">
-          <MapIcon className="w-6 h-6 group-hover:text-secondary group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest">Map</span>
-        </button>
-        <button className="flex flex-col items-center gap-2 text-error group">
-           <AlertTriangle className="w-6 h-6 group-hover:scale-110 transition-all" />
-           <span className="text-[10px] font-black uppercase tracking-widest underline decoration-2 underline-offset-4">Emergency</span>
-        </button>
-        <button className="flex flex-col items-center gap-2 opacity-50 hover:opacity-100 transition-all group">
-          <HelpCircle className="w-6 h-6 group-hover:text-secondary group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest">SOS Help</span>
+        {/* Action Button */}
+        <button 
+          onClick={() => { updateRoomStatus(roomNumber, { occupancyStatus: 'evacuated' }); onBack(); }}
+          className="mt-4 w-full py-6 bg-[#001c10] text-[#10b981] rounded-[2rem] font-headline font-black text-xl tracking-tighter italic flex items-center justify-center gap-4 hover:brightness-110 active:scale-95 transition-all shadow-xl shadow-emerald-950/20"
+        >
+          <CheckCircle className="w-6 h-6" />
+          I AM SAFE
         </button>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const VisualPitch = ({ onComplete }: { onComplete: () => void; key?: string }) => {
   const [scene, setScene] = useState<Scene>('problem');
@@ -778,7 +1137,7 @@ const VisualPitch = ({ onComplete }: { onComplete: () => void; key?: string }) =
             </div>
 
             <div className="flex gap-4">
-               <button onClick={onComplete} className="px-10 py-5 bg-on-surface text-surface rounded-[1.75rem] font-headline font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-slate-800 transition-all">Enter Dashboard</button>
+               <button onClick={onComplete} className="px-10 py-5 bg-on-surface text-surface rounded-[1.75rem] font-headline font-black text-sm uppercase tracking-widest shadow-2xl hover:bg-slate-800 transition-all flex items-center gap-3"><Zap className="w-5 h-5"/> Enter Live Demo</button>
             </div>
           </motion.div>
         )}
@@ -793,6 +1152,28 @@ export default function App() {
   const [view, setView] = useState<View>('pitch');
   const [adminView, setAdminView] = useState<AdminSubView>('dashboard');
   const [guestView, setGuestView] = useState<GuestSubView>('checkin');
+  const [crises, setCrises] = useState<CrisisEvent[]>([]);
+  const [rooms, setRooms] = useState<RoomStatus[]>([]);
+  const [, setUser] = useState<any>(null);
+  
+  useEffect(() => { 
+    // Secure Session Initialization
+    signInAnonymously(auth).catch(err => {
+      if (err.code !== 'auth/admin-restricted-operation') {
+        console.error("Session Auth failed:", err);
+      }
+    });
+    const unsubAuth = onAuthStateChanged(auth, setUser);
+
+    const unsubCrises = streamCrises(setCrises);
+    const unsubRooms = streamRooms(setRooms);
+    return () => { 
+      unsubAuth();
+      unsubCrises(); 
+      unsubRooms(); 
+    };
+  }, []);
+  const activeCrisis = crises.find(c => c.status === 'active');
 
   return (
     <div className="min-h-screen bg-surface selection:bg-secondary-container transition-all duration-500 overflow-x-hidden">
@@ -802,6 +1183,7 @@ export default function App() {
           currentSubView={adminView}
           setView={setView} 
           setSubView={setAdminView}
+          activeCrisis={activeCrisis}
         />
       )}
       
@@ -817,30 +1199,39 @@ export default function App() {
         
         <main className={cn(
           "flex-1 flex flex-col pt-16 relative",
-          view !== 'pitch' && "p-12 max-w-7xl mx-auto w-full"
+          view !== 'pitch' && view !== 'simulation' && "p-12 max-w-7xl mx-auto w-full",
+          view === 'simulation' && "p-4 md:p-8"
         )}>
           <AnimatePresence mode="wait">
-            {view === 'pitch' && <VisualPitch key="pitch" onComplete={() => setView('admin')} />}
+            {view === 'pitch' && <VisualPitch key="pitch" onComplete={() => setView('simulation')} />}
             
             {view === 'admin' && (
               <motion.div key={adminView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }}>
-                {adminView === 'dashboard' && <AdminDashboard />}
+                {adminView === 'dashboard' && <AdminDashboard rooms={rooms} />}
                 {adminView === 'incidents' && <AdminIncidents />}
                 {adminView === 'units' && <AdminUnits />}
-                {adminView === 'map' && <div className="h-[600px] w-full bg-slate-100 rounded-[3rem] items-center justify-center flex font-black text-slate-300 italic uppercase">Spatial Map Engine</div>}
-                {adminView === 'logs' && <div className="h-[600px] w-full bg-slate-100 rounded-[3rem] items-center justify-center flex font-black text-slate-300 italic uppercase">System Transaction Logs</div>}
+                {adminView === 'map' && (
+                  <ResourceInventoryDashboard />
+                )}
+                {adminView === 'logs' && <AdminLogs />}
               </motion.div>
             )}
 
             {view === 'guide' && (
               <motion.div key={guestView} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col">
-                {guestView === 'checkin' && <GuestCheckIn onLogin={() => setGuestView('dashboard')} />}
-                {guestView === 'dashboard' && <GuestDashboard setSubView={setGuestView} />}
-                {guestView === 'instructions' && <GuestGuide onBack={() => setGuestView('dashboard')} />}
+                {guestView === 'checkin' && <GuestCheckIn onLogin={() => setGuestView('dashboard')} onNavigate={setGuestView} />}
+                {guestView === 'dashboard' && <GuestDashboard setSubView={setGuestView} activeCrisis={activeCrisis} />}
+                {guestView === 'instructions' && <GuestGuide onBack={() => setGuestView('dashboard')} onNavigate={setGuestView} activeCrisis={activeCrisis} roomNumber="412" floorNumber={4} />}
                 {guestView === 'map' && (
-                   <div className="flex-1 flex flex-col gap-8 items-center justify-center">
-                      <button onClick={() => setGuestView('dashboard')} className="text-[10px] font-black uppercase tracking-widest text-slate-400">Back to Hub</button>
-                      <div className="h-64 w-full bg-slate-100 rounded-[2.5rem] flex items-center justify-center font-black text-slate-300 italic uppercase">Guest Map View</div>
+                   <div className="flex-1 flex flex-col bg-slate-50">
+                      <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-white">
+                         <button onClick={() => setGuestView('dashboard')} className="text-[10px] font-black uppercase tracking-widest text-slate-400">Back</button>
+                         <span className="text-xs font-black uppercase tracking-widest italic">Facility Guide</span>
+                         <MapIcon className="w-4 h-4 text-secondary" />
+                      </div>
+                      <div className="flex-1 p-4">
+                         <MockMap rooms={rooms} crises={crises} highlightRoom="412" className="h-full" />
+                      </div>
                    </div>
                 )}
                 {guestView === 'sos' && (
@@ -853,6 +1244,96 @@ export default function App() {
                       <p className="font-bold text-on-surface-variant text-center max-w-xs">Connecting to Sentinel Security Hub... <br/>Stay calm, help is aware of your location.</p>
                    </div>
                 )}
+              </motion.div>
+            )}
+            {view === 'simulation' && (
+              <motion.div key="sim" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }} className="flex-1 flex flex-col lg:flex-row gap-8 w-full">
+                {/* Admin Side */}
+                <div className="flex-[2] bg-white/60 backdrop-blur-3xl border border-outline-variant/20 rounded-[3rem] p-8 overflow-y-auto custom-scrollbar relative shadow-xl min-h-[600px]">
+                  <div className="absolute top-6 right-8 flex items-center gap-2 z-10">
+                     <span className="px-3 py-1 bg-slate-900 text-white text-[10px] uppercase font-black tracking-widest rounded-full">Admin View</span>
+                  </div>
+                  {adminView === 'dashboard' && <AdminDashboard rooms={rooms} />}
+                  {adminView === 'incidents' && <AdminIncidents />}
+                  {adminView === 'units' && <AdminUnits />}
+                  {adminView === 'map' && <ResourceInventoryDashboard />}
+                  {adminView === 'logs' && <AdminLogs />}
+                </div>
+                {/* Guest Side (Mobile Mockup) */}
+                <div className="flex-1 lg:max-w-[420px] flex items-center justify-center bg-slate-200/50 rounded-[3rem] p-4 lg:p-6 border border-outline-variant/20 relative shadow-inner min-h-[700px]">
+                  <div className="absolute top-6 left-8 flex items-center gap-2 z-10">
+                     <span className="px-3 py-1 bg-white text-slate-900 border border-slate-200 text-[10px] uppercase font-black tracking-widest rounded-full shadow-sm">Guest App</span>
+                  </div>
+                  <div className="w-full max-w-[360px] aspect-[9/19.5] bg-surface rounded-[3rem] border-[14px] border-slate-900 shadow-2xl relative overflow-hidden flex flex-col">
+                    {/* iPhone Notch */}
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-slate-900 rounded-b-3xl z-50"></div>
+                    <div className="flex-1 overflow-hidden relative flex flex-col bg-[#fcfdff]">
+                      {guestView !== 'checkin' && (
+                        <div className="px-6 py-4 flex justify-between items-center bg-white border-b border-slate-100 sticky top-0 z-20 shrink-0">
+                          <div className="flex items-center gap-3">
+                            <Shield className="w-5 h-5 fill-slate-900" />
+                            <span className="font-headline font-black text-lg tracking-tighter uppercase italic">Sentinel Guide</span>
+                          </div>
+                          <div className="relative">
+                             <Asterisk className="w-5 h-5 text-red-600 fill-red-600" />
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="flex-1 overflow-y-auto custom-scrollbar relative flex flex-col">
+                        {guestView === 'checkin' && <GuestCheckIn onLogin={() => setGuestView('dashboard')} onNavigate={setGuestView} />}
+                        {guestView === 'dashboard' && <GuestDashboard setSubView={setGuestView} activeCrisis={activeCrisis} />}
+                        {guestView === 'instructions' && <GuestGuide onBack={() => setGuestView('dashboard')} onNavigate={setGuestView} activeCrisis={activeCrisis} roomNumber="412" floorNumber={4} />}
+                        {guestView === 'map' && (
+                           <div className="flex-1 p-4 bg-[#fcfdff]">
+                              <MockMap rooms={rooms} crises={crises} highlightRoom="412" className="h-full" />
+                           </div>
+                        )}
+                        {guestView === 'sos' && (
+                           <div className="flex-1 p-8 flex flex-col items-center justify-center text-center gap-6 bg-[#fcfdff]">
+                              <div className="w-24 h-24 rounded-full bg-red-50 flex items-center justify-center text-red-600 animate-pulse">
+                                 <Zap className="w-12 h-12 fill-red-600" />
+                              </div>
+                              <h2 className="text-3xl font-headline font-black italic uppercase italic tracking-tighter">Emergency Hub</h2>
+                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest leading-relaxed">Connecting you directly to campus security and emergency response teams.</p>
+                              <button className="px-8 py-4 bg-[#c00000] text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-red-500/20">Call Backup</button>
+                           </div>
+                        )}
+                      </div>
+
+                      {guestView !== 'checkin' && (
+                         <div className="h-24 bg-white border-t border-slate-100 flex justify-around items-center px-4 shrink-0 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.05)]">
+                           <button onClick={() => setGuestView('dashboard')} className={cn("flex flex-col items-center gap-1.5 transition-all group", guestView === 'dashboard' ? "opacity-100" : "opacity-30")}>
+                             <Smartphone className="w-6 h-6 text-slate-900 group-hover:scale-110" />
+                             <span className={cn("text-[8px] font-black uppercase tracking-widest text-slate-900", guestView === 'dashboard' ? "visible" : "invisible")}>Hub</span>
+                           </button>
+                           
+                           <button onClick={() => setGuestView('map')} className={cn("flex flex-col items-center gap-1.5 transition-all group", guestView === 'map' ? "opacity-100" : "opacity-30")}>
+                             <MapIcon className="w-6 h-6 text-slate-900 group-hover:scale-110" />
+                             <span className={cn("text-[8px] font-black uppercase tracking-widest text-slate-900", guestView === 'map' ? "visible" : "invisible")}>Map</span>
+                           </button>
+
+                           <button onClick={() => setGuestView('instructions')} className={cn("flex flex-col items-center gap-1.5 transition-all group", guestView === 'instructions' ? "opacity-100" : "opacity-30")}>
+                             <div className={cn("p-2 rounded-xl transition-all", guestView === 'instructions' && "bg-red-50")}>
+                               <BookOpen className={cn("w-6 h-6", guestView === 'instructions' ? "text-[#c00000]" : "text-slate-900")} />
+                             </div>
+                             <span className={cn("text-[8px] font-black uppercase tracking-widest text-[#c00000]", guestView === 'instructions' ? "visible" : "invisible")}>Guide</span>
+                           </button>
+                           
+                           <button onClick={() => setGuestView('sos')} className={cn("flex flex-col items-center gap-1.5 transition-all group", guestView === 'sos' ? "opacity-100" : "opacity-30")}>
+                             <div className="relative">
+                               <MapPin className="w-6 h-6 text-slate-900 group-hover:scale-110" />
+                               <div className="absolute top-0 right-0 p-0.5 bg-slate-900 rounded-full border border-white">
+                                  <div className="w-1 h-1 bg-white rounded-full animate-ping" />
+                               </div>
+                             </div>
+                             <span className={cn("text-[8px] font-black uppercase tracking-widest text-slate-900", guestView === 'sos' ? "visible" : "invisible")}>SOS Help</span>
+                           </button>
+                         </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
