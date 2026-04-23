@@ -8,9 +8,9 @@
 ![React](https://img.shields.io/badge/React-19-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
-![GDG Hackathon 2026](https://img.shields.io/badge/GDG%20Hackathon-2026-orange)
+[![Build with AI](https://img.shields.io/badge/Build%20with%20AI-Google%20Solution%20Challenge%202026-orange?logo=google)](https://hack2skill.com/event/build-with-ai?tab=solutionchallenge2026)
 
-**NexusResponse** is a next-generation crisis coordination and emergency resource management system proudly built for the **GDG Hackathon 2026**. Powered by the expansive Google ecosystem—including **Google Gemini**, **Vertex AI**, **AI Studio**, and **Google Cloud Platform** (Firebase)—it provides real-time situational awareness, dynamic resource tracking, and automated guest guidance during critical events. Developed alongside Google DeepMind's **Antigravity** AI coding assistant, NexusResponse ensures rapid, intelligent, and coordinated crisis management.
+**NexusResponse** is a next-generation crisis coordination and emergency resource management system proudly built for the **[Build with AI — Google Solution Challenge 2026](https://hack2skill.com/event/build-with-ai?tab=solutionchallenge2026)** hosted on Hack2Skill. Powered by the expansive Google ecosystem—including **Google Gemini**, **Vertex AI**, **AI Studio**, and **Google Cloud Platform** (Firebase)—it provides real-time situational awareness, dynamic resource tracking, and automated guest guidance during critical events. Developed alongside Google DeepMind's **Antigravity** AI coding assistant, NexusResponse ensures rapid, intelligent, and coordinated crisis management.
 
 ## 🌟 Features
 
@@ -95,6 +95,19 @@ NEXUS-SMART-RESPONSE/
 - Turn-by-turn Evacuation Guidance
 - SOS Emergency Signaling
 - Facility Exploration Map
+
+## 🏆 Hackathon
+
+NexusResponse was created as a submission for the **Build with AI — Google Solution Challenge 2026**, an initiative by Google and GDG (Google Developer Groups), hosted on **Hack2Skill**.
+
+> 🔗 **Event Link**: [hack2skill.com/event/build-with-ai](https://hack2skill.com/event/build-with-ai?tab=solutionchallenge2026)
+
+This project demonstrates:
+- Real-world use of **Google Gemini** for AI-powered emergency response
+- Integration with **Google Cloud Platform** and **Firebase** as the cloud backbone
+- Prompt engineering and rapid prototyping via **Google AI Studio**
+- Enterprise-grade AI scalability through **Google Vertex AI**
+- Accelerated agentic development with **Google DeepMind's Antigravity**
 
 ## 🔬 How It Works
 
