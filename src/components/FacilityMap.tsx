@@ -39,8 +39,8 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
       targetOrbitTarget.current.set(midX, 0, midZ);
     } else {
       // STANDARD MODE: Zoomed out, overview of the facility
-      const camY = isMobile ? 48 : 35;
-      const camZ = isMobile ? 48 : 35;
+      const camY = isMobile ? 42 : 28;
+      const camZ = isMobile ? 42 : 28;
       
       targetCameraPos.current.set(0, camY, camZ);
       targetOrbitTarget.current.set(0, 0, -2); // Centered on Main Corridor
@@ -74,8 +74,8 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
   }, []);
 
   // Initial camera position matches the standard zoomed out view
-  const initialCamY = isMobile ? 48 : 35;
-  const initialCamZ = isMobile ? 48 : 35;
+  const initialCamY = isMobile ? 42 : 28;
+  const initialCamZ = isMobile ? 42 : 28;
 
   return (
     <Canvas
