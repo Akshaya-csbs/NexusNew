@@ -20,22 +20,10 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Calculate the guest's perspective / point of view framing the exit
-  const markerPos = (guestLocation && ROOM_COORDS[guestLocation]) ? ROOM_COORDS[guestLocation] : [0, 0, 0];
-  const guestX = markerPos[0];
-  const guestZ = markerPos[2];
-  
-  const exitX = guestX < 0 ? -16 : 16;
-  const exitZ = -2;
-  
-  // Center camera exactly halfway between the guest and their nearest exit to frame the route
-  const midX = (guestX + exitX) / 2;
-  const midZ = (guestZ + exitZ) / 2;
-
-  // Zoom in nicely on this specific route
-  const camX = midX;
-  const camY = isMobile ? 40 : 25; 
-  const camZ = midZ + (isMobile ? 40 : 25);
+  // Focus purely on the center portion of the map, zoomed in
+  const camX = 0;
+  const camY = isMobile ? 25 : 16; 
+  const camZ = isMobile ? 25 : 16;
 
   return (
     <Canvas
@@ -72,7 +60,7 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
 
       <OrbitControls
         makeDefault
-        target={[midX, 0, midZ]}
+        target={[0, 0, 0]}
         minPolarAngle={Math.PI / 4}
         maxPolarAngle={Math.PI / 2.5}
         minDistance={10}
