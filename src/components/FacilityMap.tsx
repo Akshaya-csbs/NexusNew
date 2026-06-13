@@ -14,7 +14,7 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
   return (
     <Canvas
       shadows
-      camera={{ position: [0, 28, 28], fov: 40, near: 0.1, far: 1000 }}
+      camera={{ position: [0, 35, 35], fov: 40, near: 0.1, far: 1000 }}
       gl={{ antialias: true, preserveDrawingBuffer: true }}
     >
       <color attach="background" args={['#a2d1c6']} />
@@ -50,7 +50,7 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
         minPolarAngle={Math.PI / 4}
         maxPolarAngle={Math.PI / 2.5}
         minDistance={10}
-        maxDistance={50}
+        maxDistance={80}
         enablePan={true}
         enableDamping={true}
       />
