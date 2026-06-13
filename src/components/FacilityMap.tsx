@@ -16,13 +16,13 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
   const { camera, controls } = useThree();
   const targetCameraPos = useRef(new THREE.Vector3());
   const targetOrbitTarget = useRef(new THREE.Vector3());
-  const isAnimating = useRef(false);
+  const animationTimeLeft = useRef(0);
 
-  // Allow the user to cancel the animation by interacting with the map
+  // Allow the user to cancel the animation instantly by interacting with the map
   useEffect(() => {
     if (!controls) return;
     const handleUserInteraction = () => {
-      isAnimating.current = false;
+      animationTimeLeft.current = 0;
     };
     controls.addEventListener('start', handleUserInteraction);
     return () => {
@@ -31,7 +31,7 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
   }, [controls]);
 
   useEffect(() => {
-    isAnimating.current = true; // Trigger animation on state change
+    animationTimeLeft.current = 2.0; // Animate for exactly 2 seconds maximum
 
     if (activeCrisis && guestLocation) {
       // CRISIS MODE: Zoom in on the guest's specific route
@@ -64,8 +64,10 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
 
   // Smoothly animate the camera to the target positions
   useFrame((state, delta) => {
-    if (!controls || !isAnimating.current) return;
+    if (!controls || animationTimeLeft.current <= 0) return;
     
+    animationTimeLeft.current -= delta;
+
     // Lerp camera position
     camera.position.lerp(targetCameraPos.current, delta * 4);
     
@@ -73,11 +75,6 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
     const orbitControls = controls as any;
     orbitControls.target.lerp(targetOrbitTarget.current, delta * 4);
     orbitControls.update();
-
-    // Stop animating once we are close enough to the target
-    if (camera.position.distanceTo(targetCameraPos.current) < 0.2) {
-      isAnimating.current = false;
-    }
   });
 
   return null;
