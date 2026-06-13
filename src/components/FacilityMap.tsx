@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, ContactShadows, SoftShadows } from '@react-three/drei';
 import Scene from './Scene';
@@ -11,10 +11,19 @@ interface FacilityMapProps {
 }
 
 export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelect, activeCrisis }: FacilityMapProps) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   return (
     <Canvas
       shadows
-      camera={{ position: [0, 35, 35], fov: 40, near: 0.1, far: 1000 }}
+      camera={{ position: isMobile ? [0, 55, 55] : [0, 35, 35], fov: 40, near: 0.1, far: 1000 }}
       gl={{ antialias: true, preserveDrawingBuffer: true }}
     >
       <color attach="background" args={['#a2d1c6']} />
@@ -50,7 +59,7 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
         minPolarAngle={Math.PI / 4}
         maxPolarAngle={Math.PI / 2.5}
         minDistance={10}
-        maxDistance={80}
+        maxDistance={100}
         enablePan={true}
         enableDamping={true}
       />
