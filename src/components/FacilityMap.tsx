@@ -1,6 +1,7 @@
-import React, { Suspense, useEffect, useState } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Environment, ContactShadows, SoftShadows } from '@react-three/drei';
+import React, { Suspense, useEffect, useState, useRef } from 'react';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import { OrbitControls, ContactShadows } from '@react-three/drei';
+import * as THREE from 'three';
 import Scene, { ROOM_COORDS } from './Scene';
 
 interface FacilityMapProps {
@@ -8,6 +9,58 @@ interface FacilityMapProps {
   selectedRoomId?: string | null;
   onRoomSelect?: (id: string) => void;
   activeCrisis?: any;
+}
+
+// Handles smooth camera transitions based on crisis state
+function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCrisis: any, guestLocation?: string, isMobile: boolean }) {
+  const { camera, controls } = useThree();
+  const targetCameraPos = useRef(new THREE.Vector3());
+  const targetOrbitTarget = useRef(new THREE.Vector3());
+
+  useEffect(() => {
+    if (activeCrisis && guestLocation) {
+      // CRISIS MODE: Zoom in on the guest's specific route
+      const markerPos = ROOM_COORDS[guestLocation] || [0, 0, 0];
+      const guestX = markerPos[0];
+      const guestZ = markerPos[2];
+      
+      const exitX = guestX < 0 ? -16 : 16;
+      const exitZ = -2;
+      
+      // Center on the route
+      const midX = (guestX + exitX) / 2;
+      const midZ = (guestZ + exitZ) / 2;
+      
+      // Tightly framed zoom
+      const camY = isMobile ? 35 : 20; 
+      const camZ = midZ + (isMobile ? 35 : 20);
+      
+      targetCameraPos.current.set(midX, camY, camZ);
+      targetOrbitTarget.current.set(midX, 0, midZ);
+    } else {
+      // STANDARD MODE: Zoomed out, overview of the facility
+      const camY = isMobile ? 48 : 35;
+      const camZ = isMobile ? 48 : 35;
+      
+      targetCameraPos.current.set(0, camY, camZ);
+      targetOrbitTarget.current.set(0, 0, -2); // Centered on Main Corridor
+    }
+  }, [activeCrisis, guestLocation, isMobile]);
+
+  // Smoothly animate the camera to the target positions
+  useFrame((state, delta) => {
+    if (!controls) return;
+    
+    // Lerp camera position
+    camera.position.lerp(targetCameraPos.current, delta * 2.5);
+    
+    // Lerp OrbitControls target
+    const orbitControls = controls as any;
+    orbitControls.target.lerp(targetOrbitTarget.current, delta * 2.5);
+    orbitControls.update();
+  });
+
+  return null;
 }
 
 export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelect, activeCrisis }: FacilityMapProps) {
@@ -20,15 +73,14 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Focus purely on the center portion of the map, zoomed in
-  const camX = 0;
-  const camY = isMobile ? 25 : 16; 
-  const camZ = isMobile ? 25 : 16;
+  // Initial camera position matches the standard zoomed out view
+  const initialCamY = isMobile ? 48 : 35;
+  const initialCamZ = isMobile ? 48 : 35;
 
   return (
     <Canvas
       shadows
-      camera={{ position: [camX, camY, camZ], fov: 40, near: 0.1, far: 1000 }}
+      camera={{ position: [0, initialCamY, initialCamZ], fov: 40, near: 0.1, far: 1000 }}
       gl={{ antialias: true, preserveDrawingBuffer: true }}
     >
       <color attach="background" args={['#a2d1c6']} />
@@ -60,13 +112,19 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
 
       <OrbitControls
         makeDefault
-        target={[0, 0, 0]}
+        target={[0, 0, -2]}
         minPolarAngle={Math.PI / 4}
         maxPolarAngle={Math.PI / 2.5}
         minDistance={10}
         maxDistance={100}
         enablePan={true}
         enableDamping={true}
+      />
+      
+      <CameraController 
+        activeCrisis={activeCrisis} 
+        guestLocation={guestLocation} 
+        isMobile={isMobile} 
       />
     </Canvas>
   );
