@@ -16,8 +16,11 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
   const { camera, controls } = useThree();
   const targetCameraPos = useRef(new THREE.Vector3());
   const targetOrbitTarget = useRef(new THREE.Vector3());
+  const isAnimating = useRef(false);
 
   useEffect(() => {
+    isAnimating.current = true; // Trigger animation on state change
+
     if (activeCrisis && guestLocation) {
       // CRISIS MODE: Zoom in on the guest's specific route
       const markerPos = ROOM_COORDS[guestLocation] || [0, 0, 0];
@@ -49,15 +52,20 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
 
   // Smoothly animate the camera to the target positions
   useFrame((state, delta) => {
-    if (!controls) return;
+    if (!controls || !isAnimating.current) return;
     
     // Lerp camera position
-    camera.position.lerp(targetCameraPos.current, delta * 2.5);
+    camera.position.lerp(targetCameraPos.current, delta * 4);
     
     // Lerp OrbitControls target
     const orbitControls = controls as any;
-    orbitControls.target.lerp(targetOrbitTarget.current, delta * 2.5);
+    orbitControls.target.lerp(targetOrbitTarget.current, delta * 4);
     orbitControls.update();
+
+    // Stop animating once we are close enough to the target
+    if (camera.position.distanceTo(targetCameraPos.current) < 0.2) {
+      isAnimating.current = false;
+    }
   });
 
   return null;
