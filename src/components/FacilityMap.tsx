@@ -39,6 +39,7 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
       targetOrbitTarget.current.set(midX, 0, midZ);
     } else {
       // STANDARD MODE: Zoomed out, overview of the facility
+      // Slightly zoomed in per user request
       const camY = isMobile ? 42 : 28;
       const camZ = isMobile ? 42 : 28;
       
@@ -73,7 +74,7 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Initial camera position matches the standard zoomed out view
+  // Initial camera position matches the standard slightly zoomed in view
   const initialCamY = isMobile ? 42 : 28;
   const initialCamZ = isMobile ? 42 : 28;
 
