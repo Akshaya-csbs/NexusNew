@@ -14,7 +14,7 @@ export default function FacilityMap({ guestLocation, selectedRoomId, onRoomSelec
   return (
     <Canvas
       shadows
-      camera={{ position: [0, 20, 20], fov: 40, near: 0.1, far: 1000 }}
+      camera={{ position: [0, 28, 28], fov: 40, near: 0.1, far: 1000 }}
       gl={{ antialias: true, preserveDrawingBuffer: true }}
     >
       <color attach="background" args={['#a2d1c6']} />
