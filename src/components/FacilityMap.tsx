@@ -18,6 +18,18 @@ function CameraController({ activeCrisis, guestLocation, isMobile }: { activeCri
   const targetOrbitTarget = useRef(new THREE.Vector3());
   const isAnimating = useRef(false);
 
+  // Allow the user to cancel the animation by interacting with the map
+  useEffect(() => {
+    if (!controls) return;
+    const handleUserInteraction = () => {
+      isAnimating.current = false;
+    };
+    controls.addEventListener('start', handleUserInteraction);
+    return () => {
+      controls.removeEventListener('start', handleUserInteraction);
+    };
+  }, [controls]);
+
   useEffect(() => {
     isAnimating.current = true; // Trigger animation on state change
 
